@@ -1,0 +1,72 @@
+include ../Makefile.inc
+include Makefile.inc
+
+ANCESTRY = $(shell awk '$$1 == "$(COHORT)" { print $$2 }' studies.txt)
+LD_BASE = $(BASE)/LD_reference
+LD_REF = $(if $(findstring EUR,$(ANCESTRY)),$(LD_BASE)/EUR_UKB/ukb_imp_chr$(CHR)_EUR_selected.bed,$(LD_BASE)/$(ANCESTRY)_1000G/ALL.chr$(CHR).phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes_Amin_Amax_noesv_$(ANCESTRY).bed)
+START_END := $(shell  awk 'NR == FNR && $$1 == "$(LOCUS)" { for (i = 1; i <= NF; i++) snp[$$i]; nextfile } $$1 in snp { pos[$$3] } END { n = asorti(pos); print pos[1] - $(WIDTH), pos[n] + $(WIDTH) }' $(LOCI) $(SENTINELS))
+START := $(firstword $(START_END))
+END := $(lastword $(START_END))
+COJO := $(COHORT)/$(COHORT)_$(STEM).cma.cojo
+JOINT := $(COHORT)/$(COHORT)_$(STEM).jma.cojo
+MA := $(COHORT)/$(COHORT)_$(PHENO).ma
+RESULTS_BASE = $(BASE)/metal/$(COHORT)
+COHORTS_SPLIT = ALSPAC Raine Twins_UK
+RESULTS_SPLIT = $(RESULTS_BASE)/$(COHORT)_$(PHENO)_all_CHR1_22_filtered_rsid.txt.gz $(RESULTS_BASE)/$(COHORT)_$(PHENO)_all_CHRX.METAL1.tbl
+RESULTS_SINGLE = $(RESULTS_BASE)/$(COHORT)_$(PHENO)_all_filtered_rsid.txt.gz
+RESULTS_$(COHORT) = $(if $(findstring $(COHORT),$(COHORTS_SPLIT)),$(RESULTS_SPLIT),$(RESULTS_SINGLE)) 
+RESULTS := $(shell echo "$(RESULTS_$(COHORT))" | sed 's/\([\b\/][^ ]\+\.gz\)/<(zcat \1)/g')
+LD_REF_LOCUS = $(TMPDIR)/$(PHENO)_chr$(CHR)_$(LOCUS)_$(ANCESTRY).bed
+HEADER = "Chr	SNP	bp	refA	freq	b	se	p	n	freq_geno	bC	bC_se	pC"
+HEADER_JOINT = $(subst bC,bJ,$(subst pC,pJ,$(HEADER)))
+
+.ONESHELL:
+
+.DELETE_ON_ERROR:
+
+.PHONY: all ma joint
+
+
+all: $(COJO)
+
+ma: $(MA)
+
+joint: $(JOINT)
+
+# Chr     SNP     bp      refA    freq    b       se      p       n       freq_geno       bC      bC_se   pC
+
+$(JOINT): $(MA) $(LD_REF_LOCUS) $(COND)
+	if [ `grep -wf $(COND) $(MA) | wc -l` -eq `cat $(COND) | wc -l` ]; then
+		./gcta64 --cojo-file $< \
+			--bfile $(basename $(LD_REF_LOCUS)) \
+			--extract $(COND) \
+			--cojo-joint \
+			--out $(@:.jma.cojo=) | tee $(@:.cojo=.log)
+		[ $${PIPESTATUS[0]} -eq 0 ] || ((grep -qwf $(COND) $(@:.jma.cojo=.freq.badsnps) || grep -q "Error: there is a collinearity problem" $(@:.cojo=.log)) && echo $(HEADER_JOINT) > $@)
+	else
+		echo $(HEADER_JOINT) > $@
+	fi
+
+$(COJO): $(MA) $(LD_REF_LOCUS) $(COND)
+	if [ `grep -wf $(COND) $(MA) | wc -l` -eq `cat $(COND) | wc -l` ]; then
+		./gcta64 --cojo-file $< \
+			--bfile $(basename $(LD_REF_LOCUS)) \
+			--cojo-cond $(COND) \
+			--out $(@:.cma.cojo=) | tee $(@:.cojo=.log)
+		[ $${PIPESTATUS[0]} -eq 0 ] || ((grep -qwf $(COND) $(@:.cma.cojo=.freq.badsnps) || grep -q "Error: there is a collinearity problem" $(@:.cojo=.log)) && echo $(HEADER) > $@)
+	else
+		echo $(HEADER) > $@
+	fi
+
+$(MA): makema.awk $(RESULTS_$(COHORT)) | $(COHORT)
+	./$< $(RESULTS) > $@
+
+$(COND): 
+	$(MAKE) -f Makefile $@ ROUND=$(ROUND) LOCUS=$(LOCUS) CHR=$(CHR) PHENO=$(PHENO)
+
+$(LD_REF_LOCUS): $(LD_REF)
+	module load plink
+	plink --bfile $(basename $<) --chr $(CHR) --from-bp $(START) --to-bp $(END) --make-bed --out $(basename $@)
+
+$(COHORT):
+	mkdir $@

@@ -1,0 +1,59 @@
+SHELL = /bin/bash
+TMPDIR ?= .
+MUNGE = $(TMPDIR)/ldsc/munge_sumstats.py
+LDSC = $(TMPDIR)/ldsc/ldsc.py
+REF = $(TMPDIR)/eur_w_ld_chr
+PHENO = severe_asthma
+SETUP_PYTHON = module load python/gcc/2.7.13; export PYTHONPATH=~/lib/python2.7/site-packages
+N = 321047
+INFO = 0.5
+
+.ONESHELL:
+
+$(PHENO)_h2_gc.log: $(PHENO)_gc.sumstats.gz | $(LDSC) $(REF)
+	$(SETUP_PYTHON)
+	$(LDSC) --h2 $< --ref-ld-chr $(REF)/ --w-ld-chr $(REF)/ --out $(@:.log=)
+
+$(PHENO)_gc.sumstats.gz: ../$(PHENO).results_gc.txt.gz | $(MUNGE)
+	$(SETUP_PYTHON)
+	$(MUNGE) --sumstats $< \
+		--snp "#SNP" \
+		--a1 ALLELE1 --a2 ALLELE0 \
+		--N $N \
+		--p P_GC \
+		--info-min $(INFO) \
+		--frq A1FREQ \
+		--out $(@:.sumstats.gz=)
+
+../$(PHENO).results_gc.txt.gz: ../%:
+	$(MAKE) -C .. $*
+
+$(PHENO)_h2.log: $(PHENO).sumstats.gz | $(LDSC) $(REF)
+	$(SETUP_PYTHON)
+	$(LDSC) --h2 $< --ref-ld-chr $(REF)/ --w-ld-chr $(REF)/ --out $(@:.log=)
+
+#$(PHENO).sumstats.gz: $(TMPDIR)/$(PHENO).input.gz | $(MUNGE)
+$(PHENO).sumstats.gz: ../$(PHENO).results.txt.gz | $(MUNGE)
+	$(SETUP_PYTHON)
+	$(MUNGE) --sumstats $< \
+		--snp "#SNP" \
+		--a1 ALLELE1 --a2 ALLELE0 \
+		--N $N \
+		--p P_BOLT_LMM \
+		--info-min $(INFO) \
+		--frq A1FREQ \
+		--out $(@:.sumstats.gz=)
+
+#$(TMPDIR)/$(PHENO).input.gz: ../$(PHENO).snptest.gz
+#	zcat $< | awk 'NR == 1 { $$(NF + 1) = "snp" } NR > 1 { $$(NF + 1) = $$1 } $$NF ~ /^rs/ { sub(":.*", "", $$NF) } { print }' | gzip > $@
+
+$(MUNGE) $(LDSC):
+	cd $(TMPDIR)
+	git clone https://github.com/bulik/ldsc.git
+
+$(REF): | $(REF).tar.bz2
+	tar -C $(TMPDIR) -jxf $|
+	
+$(REF).tar.bz2:
+	cd $(@D)
+	wget https://data.broadinstitute.org/alkesgroup/LDSCORE/$(@F)

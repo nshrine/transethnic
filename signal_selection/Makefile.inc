@@ -1,0 +1,5 @@
+PHENO = FEV1
+CHR = 4
+P = 5e-9
+MAC = 20
+WIDTH = 1000000
