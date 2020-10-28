@@ -7,25 +7,29 @@ COJOS_FORMATTED := $(subst cma.cojo,cma.txt,$(COJOS))
 #MAS := $(foreach c,$(COHORTS),$(subst COHORT,$c,COHORT/COHORT_$(PHENO).ma))
 METAL = $(STEM).metal
 METAL_JOINT = $(STEM)_joint.metal
-META := $(STEM)_1.tbl
 META_JOINT := $(STEM)_joint_1.tbl
 JOINTS := $(subst cma,jma,$(COJOS))
 JOINTS_FORMATTED := $(subst cma,jma,$(COJOS_FORMATTED))
+PREV_ROUND = $(shell expr $(ROUND) - 1)
+PREV_COND := $(subst round$(ROUND),round$(PREV_ROUND),$(COND))
+PREV_META := $(subst $(ROUND)_1,$(PREV_ROUND)_1,$(META))
 
 .ONESHELL:
 
 .DELETE_ON_ERROR:
 
-.PHONY: all joint $(COJOS) $(JOINTS)
+.PHONY: all joint cond
 
 
 all: $(META)
 
 joint: $(META_JOINT)
 
+cond: $(COND)
+
 # Chr     SNP     bp      refA    freq    b       se      p       n       freq_geno       bC      bC_se   pC
 
-%_1.tbl: %.metal
+$(META) $(META_JOINT): %_1.tbl: %.metal
 	metal $< | tee $(@:_1.tbl=.log)
 
 $(METAL): $(COJOS_FORMATTED)
@@ -67,7 +71,7 @@ $(JOINTS_FORMATTED): %_$(STEM).jma.txt: %_$(STEM).jma.cojo
 
 vpath %_$(STEM).jma.cojo $(COHORTS)
 
-$(COJOS_FORMATTED) $(JOINTS_FORMATTED):
+$(COJOS_FORMATTED) $(JOINTS_FORMATTED): 
 	module load R
 	Rscript - <<-RSCRIPT
 		library(tidyverse)
@@ -79,16 +83,31 @@ $(COJOS_FORMATTED) $(JOINTS_FORMATTED):
 			write_tsv("$@")
 	RSCRIPT
 			
-#$(COJOS): %_$(STEM).cma.cojo: %_$(PHENO).ma $(COND)
-$(COJOS): %_$(STEM).cma.cojo:
+$(COJOS): %_$(STEM).cma.cojo: $(COND)
 	$(MAKE) -f Makefile.cohort PHENO=$(PHENO) CHR=$(CHR) LOCUS=$(LOCUS) COHORT=$(notdir $*) ROUND=$(ROUND)
 	
-#$(JOINTS): %_$(STEM).jma.cojo: %_$(PHENO).ma $(COND)
-$(JOINTS): %_$(STEM).jma.cojo: 
+$(JOINTS): %_$(STEM).jma.cojo: $(COND)
 	$(MAKE) -f Makefile.cohort joint PHENO=$(PHENO) CHR=$(CHR) LOCUS=$(LOCUS) COHORT=$(notdir $*) ROUND=$(ROUND)
 	
 vpath %_$(PHENO).ma $(COHORTS)
 
-#$(MAS): %_$(PHENO).ma: FORCE
-#	$(MAKE) -f Makefile.cohort $@ PHENO=$(PHENO) COHORT=$(notdir $*)
+ifeq ($(ROUND),1)
+$(COND): $(LOCI) $(SENTINELS)
+	awk 'NR == FNR && $$1 == "$(LOCUS)" {
+		for (i = 1; i <= NF; i++) snp[$$i]
+		nextfile } $$1 in snp { p[$$1] = $$NF
+	}
 
+	END {
+		asort(p, q)
+		for (i in p)
+			if(p[i] == q[1])
+				print i
+	}' $^ > $@
+else
+$(COND): $(PREV_COND) $(PREV_META)
+	cat  $(PREV_COND) > $@
+	awk 'BEGIN { minP = $P }
+		NR > 1 && 2*($$4 < 0.5 ? $$4 : 1 - $$4)*$$6 >= $(MAC) && $$(NF - 1) < minP { id = $$1; minP = $$(NF - 1) }
+		END { if (id) print id }' $(PREV_META) >> $@
+endif

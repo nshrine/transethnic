@@ -1,31 +1,40 @@
 #!/bin/bash
 
-if [ $# -lt 3 ]; then
-    echo "Usage: $0 PHENO CHR ROUND"
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 PHENO ROUND"
     exit 1
 fi
 
 PHENO=$1
-CHR=$2
-ROUND=$3
-PREV_ROUND=$((ROUND - 1))
-LOCI=../${PHENO}_chr${CHR}_loci.txt
-n=$((`cat ${LOCI} | wc -l` - 1))
+ROUND=$2
 
-if [ $ROUND -eq 1 ]; then
-    qsub -v PHENO=${PHENO},CHR=${CHR},ROUND=${ROUND} -t 1-$n -N ${PHENO}_chr${CHR}_round${ROUND} run_conditional.sh
-else
+for CHR in {1..22}; do
+    LOCI=../${PHENO}_chr${CHR}_loci.txt
+    n=$((`cat ${LOCI} | wc -l` - 1))
+
     for i in `seq 1 $n`; do
-        if [ -s ${PHENO}_chr${CHR}_locus${i}_round${PREV_ROUND}_1.tbl ]; then
-            make cond PHENO=$PHENO CHR=$CHR ROUND=$ROUND LOCUS=locus$i
-            if [ `cat ${PHENO}_chr${CHR}_locus${i}_round${ROUND}.cond | wc -l` -eq $ROUND ]; then
-                echo "Running locus$i"
-                qsub -v PHENO=${PHENO},CHR=${CHR},ROUND=${ROUND} -t $i -N ${PHENO}_chr${CHR}_round${ROUND} run_conditional.sh
+        STEM=${PHENO}_chr${CHR}_locus${i}
+        COND=${STEM}_round${ROUND}.cond
+        META=${STEM}_round${ROUND}_1.tbl
+        OUT="$PHENO $CHR locus$i $ROUND"
+        finished=false
+        
+        if [ $ROUND -gt 1 ]; then
+            for i in `seq 2 ${ROUND}`; do
+                PREV_COND=${STEM}_round$((i - 1)).cond
+                THIS_COND=${STEM}_round${i}.cond
+                [ -s ${PREV_COND} ] && [ -s ${THIS_COND} ] &&
+                    [ `wc -l < ${PREV_COND}` -eq `wc -l < ${THIS_COND}` ] &&
+                    finished=true && break
+            done
+        fi
+
+        if ! $finished; then
+            if [ -s $COND ]; then
+                [ `wc -l < $COND` -eq $ROUND ] && [ ! -s $META ] && echo $OUT
             else
-                echo "Skipping locus$i"
+                echo "$OUT not run yet"
             fi
-        else
-            echo "Skipping locus$i"
         fi
     done
-fi
+done

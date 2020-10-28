@@ -17,7 +17,7 @@ if [ $ROUND -eq 1 ]; then
 else
     for i in `seq 1 $n`; do
         if [ -s ${PHENO}_chr${CHR}_locus${i}_round${PREV_ROUND}_1.tbl ]; then
-            make -f Makefile.cohort cond PHENO=$PHENO CHR=$CHR ROUND=$ROUND LOCUS=locus$i
+            make cond PHENO=$PHENO CHR=$CHR ROUND=$ROUND LOCUS=locus$i
             if [ `cat ${PHENO}_chr${CHR}_locus${i}_round${ROUND}.cond | wc -l` -eq $ROUND ]; then
                 echo "Running locus$i"
                 qsub -v PHENO=${PHENO},CHR=${CHR},ROUND=${ROUND} -t $i -N ${PHENO}_chr${CHR}_round${ROUND} run_conditional.sh

@@ -10,7 +10,13 @@ results <- read_tsv(file("stdin"))
 orig_names <- names(results)
 idcol <- names(results) %>% grep("MarkerName|unique_id", ., value=TRUE) %>%
     sym
+
+dups <- results %>%
+    filter(duplicated(!!idcol)) %>%
+    pull(!!idcol)
+
 results <- results %>%
+    filter(!(!!idcol %in% dups)) %>%
     select(-starts_with("chr")) %>%
     separate(!!idcol, c("CHR", "BP", "Amin", "Amax"))
 
