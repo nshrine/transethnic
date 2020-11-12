@@ -4,7 +4,6 @@ include Makefile.inc
 COHORTS := $(shell cut -f 1 studies.txt)
 COJOS := $(foreach c,$(COHORTS),$(subst COHORT,$c,COHORT/COHORT_$(STEM).cma.cojo))
 COJOS_FORMATTED := $(subst cma.cojo,cma.txt,$(COJOS))
-#MAS := $(foreach c,$(COHORTS),$(subst COHORT,$c,COHORT/COHORT_$(PHENO).ma))
 METAL = $(STEM).metal
 METAL_JOINT = $(STEM)_joint.metal
 META_JOINT := $(STEM)_joint_1.tbl
