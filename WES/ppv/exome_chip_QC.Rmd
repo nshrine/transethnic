@@ -1,0 +1,208 @@
+---
+title: "Exome chip association results"
+author: "Nick Shrine"
+date: "25/3/2021"
+output:
+  html_notebook:
+    code_folding: hide
+    fig_caption: yes
+---
+
+```{r setup, message=FALSE, results='hide'}
+library(tidyverse)
+library(GenomicRanges)
+library(scales)
+library(captioner)
+library(qqman)
+library(pander)
+```
+
+```{r load, message=FALSE, warning=FALSE, results='hide'}
+pheno <- list("FEV1", "FVC", "FF", "PEF") 
+names(pheno) <- pheno
+assoc <- pheno %>%
+    map(~paste0("../assoc/", ., "_1.tbl")) %>%
+    map_df(read_tsv, .id="pheno")
+
+bim <- read_tsv("array_not_gwas.bim", col_names=c("CHR", "SNP", "CM", "BP", "A1", "A2"))
+
+freqx <- list(chip="array_not_gwas_samp_common_keep_freqx.frqx",
+             wes="array_wes_samp_common_keep_freqx.frqx") %>%
+    map_df(read_tsv, .id="method")
+
+ppv <- read_tsv("array_not_gwas_ppv.txt.gz")
+
+signals <- read_tsv("signals.txt")
+wes_variants_passQC <- read_tsv("ukb_exome_variants_pass_essentialQC_hg.txt.gz", col_names="SNP")
+```
+
+# Overview
+
+1. Select exome chip results within $\pm$ 500kb of `r nrow(signals)` TE meta GWAS sentinels
+2. Select WES calls that overlap with these results
+3. Calculate sensitivity, specificity & PPV for variants in overlap of QC'ed WES and exome chip results
+4. Look at how many signals left after filtering on above metrics + concordance and MAC
+
+```{r merge, message=FALSE, results='hide', warning=FALSE}
+assoc_bim <- left_join(assoc, bim %>% select(-CM), c("MarkerName" = "SNP")) %>%
+    mutate(SNP=paste(CHR, BP, pmin(A1, A2), pmax(A1, A2), sep="_")) %>%
+    dplyr::rename(P=`P-value`)
+
+assoc_bim.GRanges <- assoc_bim %>%
+    select(pheno, SNP, CHR, BP) %>%
+    unite(phe_chr, c(pheno, CHR)) %>%
+    makeGRangesFromDataFrame(seqnames.field = "phe_chr", start.field = "BP",
+                             end.field = "BP", keep.extra.columns = TRUE)
+
+signals.GRanges <- signals %>%
+    unite(phe_chr, c(trait, chr)) %>%
+    makeGRangesFromDataFrame(seqnames.field = "phe_chr", start.field = "pos",
+                             end.field = "pos", keep.extra.columns = TRUE)
+
+assoc_overlaps <- mergeByOverlaps(assoc_bim.GRanges, signals.GRanges, maxgap = 5e5) %>%
+    as.data.frame %>%
+    as_tibble %>%
+    mutate(pheno=sub("_.+", "", assoc_bim.GRanges.seqnames)) %>%
+    select(pheno, sentinel, SNP) %>%
+    inner_join(assoc_bim)
+
+freqx_ppv <- freqx %>%
+    rename_all(~sub("C\\(", "", .) %>% sub("\\)", "", .) %>% sub(" ", "_", .)) %>%
+    mutate(MAC=HET + 2*pmin(HOM_A1, HOM_A2), N_OBS=2*(HOM_A1 + HET + HOM_A2) + HAP_A1 + HAP_A2, MAF=MAC/N_OBS) %>%
+    pivot_wider(names_from = "method",
+                values_from = c("HOM_A1", "HET", "HOM_A2", "HAP_A1", "HAP_A2",
+                                "MISSING", "MAC", "N_OBS", "MAF")) %>%
+    left_join(ppv) %>%
+    filter(SNP %in% assoc_overlaps$SNP) %>%
+    mutate(passQC = SNP %in% wes_variants_passQC$SNP) 
+```
+
+## Exome array variants within $\pm$ 500kb of `r nrow(signals)` TE meta GWAS sentinels
+
+#### `r assoc_overlaps %>% pull(SNP) %>% unique %>% length %>% comma` variants
+
+```{r manh, warning=FALSE, results='asis', echo=FALSE}
+panderOptions("big.mark", ",")
+
+table(assoc_overlaps$pheno) %>%
+    pander
+
+figs <- captioner(prefix = "Figure")
+caption <- function(x, ...) figs(name=x, ...) %>% cat
+
+walk(pheno, function(x) {
+    assoc_overlaps %>%
+        filter(pheno == x) %>%
+        manhattan
+    caption(x, x)
+})
+```
+
+### Exome array variants within $\pm$ 500kb of `r nrow(signals)` TE meta GWAS sentinels and with WES call
+
+#### `r assoc_overlaps %>% filter(SNP %in% freqx_ppv$SNP) %>% pull(SNP) %>% unique %>% length %>% comma` variants
+
+```{r manh_wes, warning=FALSE, results='asis', echo=FALSE}
+table(assoc_overlaps %>%
+    filter(SNP %in% freqx_ppv$SNP) %>% pull(pheno)) %>%
+    pander
+
+walk(pheno, function(x) {
+    assoc_overlaps %>%
+        filter(pheno == x & SNP %in% freqx_ppv$SNP) %>%
+        manhattan
+    caption(paste(x, "wes", sep="_"), paste(x, "overlapping with WES"))
+})
+```
+
+# Sensitivity and PPV
+
+```{r sens_ppv, warning=FALSE, results='asis', echo=FALSE}
+ggplot(freqx_ppv, aes(x=1 - specificity, y=sensitivity)) +
+    geom_point() +
+    geom_abline(slope=1, intercept=0, linetype=2) +
+    scale_x_continuous(label=percent, name="False positive rate", limits=c(0,1)) +
+    scale_y_continuous(label=percent, limits=c(0,1)) 
+caption("roc", "Sensitivity vs. false-positive rate") 
+
+ggplot(freqx_ppv %>% drop_na, aes(x=TP + FN, y=TP + FP)) +
+    geom_point(aes(colour=sensitivity > 0.8 & specificity > 0.99)) +
+    geom_abline(slope=1, intercept=0, linetype=2) +
+    scale_x_log10(label=comma, name="WES het. count") +
+    scale_y_log10(label=comma, name="Array het. count") +
+    scale_colour_manual(values=c("grey", "black")) +
+    theme(legend.position = "bottom")
+caption("hetcomp1", "Concordance of het. counts") 
+
+ggplot(freqx_ppv, aes(x=PPV, y=sensitivity)) +
+    geom_point() +
+    geom_abline(slope=1, intercept=0, linetype=2) +
+    scale_x_continuous(label=percent) +
+    scale_y_continuous(label=percent)
+caption("roc_ppv", "Sensitivity vs PPV")
+
+ggplot(freqx_ppv, aes(x=sensitivity)) +
+    geom_histogram(bins=20) +
+    scale_x_continuous(label=percent) +
+    scale_y_sqrt()
+caption("sens_hist", "Sensitivity")
+
+ggplot(freqx_ppv, aes(x=PPV)) +
+    geom_histogram(bins=20) +
+    scale_x_continuous(label=percent) 
+caption("ppv_hist", "PPV")
+
+ggplot(freqx_ppv %>% drop_na, aes(x=TP + FN, y=TP + FP)) +
+    geom_point(aes(colour=PPV > 0.8), alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype=2) +
+    scale_x_log10(label=comma, name="WES het. count") +
+    scale_y_log10(label=comma, name="Array het. count") +
+    scale_colour_manual(values=c("grey", "black")) +
+    theme(legend.position = "bottom")
+caption("filt_ppv", "Concordance with PPV filter only")
+
+ggplot(freqx_ppv %>% drop_na, aes(x=TP + FN, y=TP + FP)) +
+    geom_point(aes(colour=PPV > 0.8 & sensitivity > 0.5), alpha=0.7) +
+    geom_abline(slope=1, intercept=0, linetype=2) +
+    scale_x_log10(label=comma, name="WES het. count") +
+    scale_y_log10(label=comma, name="Array het. count") +
+    scale_colour_manual(values=c("grey", "black")) +
+    theme(legend.position = "bottom")
+caption("filt_ppv_sens", "Concordance with PPV and sensitivity filter")
+
+filtered_snps <- freqx_ppv %>% filter(PPV > 0.8 & sensitivity > 0.5) %>% pull(SNP)
+```
+
+### Filtered "good" exome array calls (PPV >80% and sensitivity >50%)
+
+#### `r assoc_overlaps %>% filter(SNP %in% filtered_snps) %>% pull(SNP) %>% unique %>% length %>% comma` variants
+
+```{r filt, message=FALSE, results='asis', echo=FALSE}
+table(assoc_overlaps %>%
+    filter(SNP %in% filtered_snps) %>% pull(pheno)) %>%
+    pander
+
+walk(pheno, function(x) {
+    assoc_overlaps %>%
+        filter(pheno == x & SNP %in% filtered_snps) %>%
+        manhattan
+    caption(paste(x, "filt", sep="_"), paste(x, "filtered"))
+})
+```
+
+### Filtered "good" exome array calls or MAF >0.1%
+
+#### `r assoc_overlaps %>% filter(SNP %in% filtered_snps | (Freq1 >= 0.001 & Freq1 <= 0.999)) %>% pull(SNP) %>% unique %>% length %>% comma` variants
+
+```{r filt_maf, message=FALSE, results='asis', echo=FALSE}
+table(assoc_overlaps %>%
+    filter(SNP %in% filtered_snps | (Freq1 >= 0.001 & Freq1 <= 0.999)) %>% pull(pheno)) %>%
+    pander
+
+walk(pheno, function(x) {
+    assoc_overlaps %>%
+        filter(pheno == x & (SNP %in% filtered_snps | (Freq1 >= 0.001 & Freq1 <= 0.999))) %>%
+        manhattan
+    caption(paste(x, "filt_MAF", sep="_"), paste(x, "PPV filtered for MAF <0.1%"))
+})
+```
