@@ -8,7 +8,7 @@ BHS	L	L	ratio	L/sec
 CHSAA	L	L	ratio	L/sec
 CHSEA	L	L	ratio	L/sec
 CKB	L	L	ratio	L/sec
-EPIC	L	L	ratio	L/min
+EPIC	L	L	ratio	L/sec
 EXCEED	L	L	ratio	L/sec
 FHS	mL	mL	percent	L/sec
 FinnTwin	L	L	ratio	L/sec
@@ -16,7 +16,7 @@ GS20K	L	L	ratio	L/sec
 H2000	L	L	ratio	L/sec
 HCHS	mL	mL	percent	mL/sec
 hunt	L	L	ratio	L/sec
-KORA_F4	L	L	percent	L/sec
+KORA_F4	L	L	ratio	L/sec
 KORA_S3	L	L	percent	L/sec
 Korcula	L	L	ratio	L/min
 LBC1936	L	L	percent	L/min
