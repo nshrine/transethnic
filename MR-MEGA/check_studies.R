@@ -19,7 +19,14 @@ ggplot(FHS_comp, aes(x=Effect, y=beta.cor)) +
     geom_abline(slope=1, intercept=0, linetype=2) +
     geom_smooth(method = "lm")
 
-ggplot(FHS_comp, aes(x=Effect, y=beta.cor)) +
+FHS_comp <- FHS_comp %>%
+    mutate(MAF=ifelse(Freq1 > 0.5, 1-Freq1, Freq1))
+
+ggplot(FHS_comp %>% filter(MAF > 0.001), aes(x=Effect, y=beta.cor)) +
     geom_point() +
     geom_abline(slope=1, intercept=0, linetype=2) +
     geom_smooth(method = "lm")
+
+ggplot(FHS_comp, aes(x=abs(Effect))) +
+    geom_histogram() + 
+    scale_y_log10()

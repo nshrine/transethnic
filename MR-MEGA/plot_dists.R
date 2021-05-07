@@ -1,10 +1,10 @@
 library(tidyverse)
 
 results <- read_tsv("check_dists_results_MAC10.txt")
-results_long <- pivot_longer(results, 3:14)
-ggplot(results_long, aes(x=value)) +
-    geom_histogram() +
-    facet_grid(name ~ pheno, scales="free")
+#results_long <- pivot_longer(results, 3:14)
+#ggplot(results_long, aes(x=value)) +
+#    geom_histogram() +
+#    facet_grid(name ~ pheno, scales="free")
 
 ggplot(results, aes(x=cohort, y=BETA_sd)) +
     geom_bar(stat="identity") +
